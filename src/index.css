@@ -15,4 +15,5 @@ code {
 .ProseMirror {
     margin: 40px;
     border: 1px solid grey;
+    background-color: white;
 }
