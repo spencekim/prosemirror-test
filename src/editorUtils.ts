@@ -14,7 +14,7 @@ interface EditorArgs {
     div: HTMLDivElement;
 }
 
-//test
+//tests
 export function createEditor(args: EditorArgs): Editor {
     const { div } = args;
 
