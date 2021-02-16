@@ -1,7 +1,7 @@
-import React, { RefObject, useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import styled from '@emotion/styled';
 import { EditorView } from 'prosemirror-view';
-import { createEditor } from './editorUtils';
+import { createEditor } from './pm/editorUtils';
 
 interface EditorProps {
     editorView: React.MutableRefObject<EditorView | undefined>;

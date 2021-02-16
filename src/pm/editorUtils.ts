@@ -1,9 +1,11 @@
+import { wrapInList } from './commands';
 import { baseKeymap } from 'prosemirror-commands';
 import { keymap } from 'prosemirror-keymap';
 import { EditorState } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import { schema } from './schema';
 import { undo, redo, history } from 'prosemirror-history';
+import { ListPlugin } from './plugins/startListPlugin';
 
 export interface Editor {
     view: EditorView;
@@ -21,11 +23,12 @@ export function createEditor(args: EditorArgs): Editor {
     const state = EditorState.create({
         schema,
         plugins: [
+            ListPlugin,
             history({ newGroupDelay: 300 }),
             keymap({
                 'Mod-z': undo,
                 'Mod-Shift-z': redo,
-                'Mod-b': toggleMarkDebug(schema.marks.strong)
+                'Mod-o': wrapInList(schema.nodes.bulletList, {})
             }),
             keymap(baseKeymap)
         ]
