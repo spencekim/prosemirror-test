@@ -11,7 +11,7 @@ const startBulletedList = (regexp: RegExp) =>
     });
 
 const ListPlugin = inputRules({
-    rules: [startBulletedList(new RegExp('^-[^S\\n]', 'gi'))] // for some reason, simply using '^- ' does not work
+    rules: [startBulletedList(new RegExp('^-[^S\\n\\S]', 'gi'))] // for some reason, simply using '^- ' does not work
 });
 
 export { ListPlugin };

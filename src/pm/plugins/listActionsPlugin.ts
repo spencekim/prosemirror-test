@@ -1,6 +1,7 @@
-import { Node } from 'prosemirror-model';
-import { Plugin, PluginKey, Selection, Transaction } from 'prosemirror-state';
+import { Fragment, Slice } from 'prosemirror-model';
+import { EditorState, Plugin, PluginKey, Transaction } from 'prosemirror-state';
 import { schema } from '../schema';
+import { canSplit, ReplaceAroundStep } from 'prosemirror-transform';
 
 export const ListActionsPlugin = new Plugin({
     key: new PluginKey('listActionsPlugin'),
@@ -16,106 +17,130 @@ export const ListActionsPlugin = new Plugin({
             )
                 return false;
 
-            const shouldDispatch = false;
+            let shouldDispatch = false;
             const tr = view.state.tr;
 
-            // if the currently selected range includes multiple listItem nodes,
-            //   we need to handle each of these independently
-            view.state.doc.nodesBetween(
-                view.state.selection.from,
-                view.state.selection.to,
-                (node, pos, parent) => {
-                    if (node.type === schema.nodes.text) {
-                        if (parent.type === schema.nodes.bulletList) {
-                            // this is a top level list item
-                            shouldDispatch = handleTopLevelListItemKeyboardEvent(
-                                tr,
-                                view.state.selection,
-                                event,
-                                node,
-                                pos,
-                                parent
-                            );
-                        }
-                        if (parent.type === schema.nodes.listItem) {
-                            // this is a nested list item
-                        }
+            switch (event.code) {
+                case 'Enter':
+                    shouldDispatch = splitListItem(tr, view.state);
+                    break;
+                case 'Tab':
+                    if (event.shiftKey) {
+                        // lift list item
                     }
-                }
-            );
+                    shouldDispatch = sinkListItem(tr, view.state);
+                    break;
+                // case 'Backspace':
+                //     break;
+            }
 
             if (shouldDispatch) {
-                // dispatch needs to be executed outside of the callback
                 view.dispatch(tr);
                 return true;
             }
+
             return false;
         }
     }
 });
 
-const handleTopLevelListItemKeyboardEvent = (
-    tr: Transaction,
-    selection: Selection,
-    event: KeyboardEvent,
-    node: Node,
-    pos: number,
-    parent: Node
-): boolean => {
-    switch (event.code) {
-        case 'Enter':
-            if (parent.childCount === 1 && node.content.size === 2) {
-                // this <li> is empty (size = 2 means empty paragraph),
-                //   and is the sole child of the enclosing <ul>,
-                //   so replace the enclosing <ul> with an empty paragraph
-                tr.replaceWith(
-                    pos - 1,
-                    pos - 1 + parent.nodeSize,
-                    schema.nodes.paragraph.create()
-                );
-                return true;
-            } else if (parent.childCount > 1 && node.content.size === 2) {
-                // enclosing <ul> wraps at least one other <li> entry besides this one, and
-                //   this <li> is empty, so exit the enclosing <ul> and replace position
-                //   with an empty paragraph
-            } else if (node.content.size > 2) {
-                const nodeEnd = pos + node.nodeSize;
-                if (selection.to < nodeEnd) {
-                    return false;
-                }
-                // split non-empty listItem
-                const newListItem = schema.nodes.listItem.create(
-                    undefined,
-                    schema.nodes.paragraph.create()
-                );
-                tr.replaceSelectionWith(newListItem);
-                return true;
-            }
+// Sink the list item around the selection down into an inner list
+const sinkListItem = (tr: Transaction, state: EditorState) => {
+    const { $from, $to } = state.selection;
+    const itemType = schema.nodes.listItem;
+    const range = $from.blockRange(
+        $to,
+        (p) => p.childCount !== 0 && p.firstChild?.type === itemType
+    );
+    if (!range) return false;
+    const startIndex = range.startIndex;
+    if (startIndex == 0) return false;
+    const parent = range.parent,
+        nodeBefore = parent.child(startIndex - 1);
+    if (nodeBefore.type != itemType) return false;
 
+    const nestedBefore =
+        nodeBefore.lastChild && nodeBefore.lastChild.type == parent.type;
+    const inner = Fragment.from(
+        nestedBefore ? schema.nodes.listItem.create() : undefined
+    );
+    const slice = new Slice(
+        Fragment.from(
+            itemType.create(
+                null,
+                Fragment.from(parent.type.create(null, inner))
+            )
+        ),
+        nestedBefore ? 3 : 1,
+        0
+    );
+    const before = range.start,
+        after = range.end;
+    tr.step(
+        new ReplaceAroundStep(
+            before - (nestedBefore ? 3 : 1),
+            after,
+            before,
+            after,
+            slice,
+            1,
+            true
+        )
+    );
+
+    return true;
+};
+
+// Splits a textblock within a list item
+const splitListItem = (tr: Transaction, state: EditorState) => {
+    const { $from, $to } = state.selection;
+    if ($from.depth < 2 || !$from.sameParent($to)) return false;
+    if (
+        !(
+            $from.parent.type === schema.nodes.paragraph &&
+            $from.node(-1).type === schema.nodes.listItem
+        )
+    )
+        return false;
+
+    if ($from.parent.content.size === 0) {
+        // Empty block. If this is a nested list, the wrapping list item should be split.
+        if (
+            $from.node(-3).type !== schema.nodes.listItem ||
+            $from.depth == 2 ||
+            $from.index(-2) != $from.node(-2).childCount - 1
+        )
             return false;
-        case 'Backspace':
-            if (parent.childCount === 1 && node.content.size === 0) {
-                // this <li> is empty, and is the sole child of the enclosing <ul>,
-                //   so replace the enclosing <ul> with an empty paragraph
-                tr.replaceWith(
-                    pos - 1,
-                    pos - 1 + parent.nodeSize,
-                    schema.nodes.paragraph.create()
-                );
-                return true;
-            }
-            return false;
-        case 'Tab':
-            if (event.shiftKey) {
-                // shift tab event
-            }
-            if (parent.firstChild === node) {
-                // don't allow first child to nest
-                return true;
-            }
-            // eslint-disable-next-line no-case-declarations
-            return true;
-        default:
-            return false;
+
+        let wrap = Fragment.empty;
+        const keepItem = $from.index(-1) > 0;
+        // Build a fragment containing empty versions of the structure
+        // from the outer list item to the parent node of the cursor
+        for (
+            let d = $from.depth - (keepItem ? 1 : 2);
+            d >= $from.depth - 3;
+            d--
+        )
+            wrap = Fragment.from($from.node(d).copy(wrap));
+
+        // Add a second list item with an empty default start node
+        const newItem = schema.nodes.listItem.createAndFill();
+        wrap = wrap.append(Fragment.from(newItem as any));
+
+        tr.replace(
+            $from.before(keepItem ? undefined : -1),
+            $from.after(-3),
+            new Slice(wrap, keepItem ? 3 : 2, 2)
+        );
+        return true;
     }
+    const nextType =
+        $to.pos == $from.end()
+            ? $from.node(-1).contentMatchAt(0).defaultType
+            : null;
+    tr.delete($from.pos, $to.pos);
+    const types = nextType && [undefined, { type: nextType }];
+    if (!canSplit(tr.doc, $from.pos, 2, types as any)) return false;
+    tr.split($from.pos, 2, types as any);
+    return true;
 };

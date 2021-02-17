@@ -27,8 +27,7 @@ export const bulletList: NodeSpec = {
 // :: NodeSpec
 // A list item (`<li>`) spec.
 export const listItem: NodeSpec = {
-    content: 'paragraph* bulletList*',
-    group: 'block',
+    content: 'paragraph block*',
     parseDOM: [{ tag: 'li' }],
     toDOM() {
         return ['li', 0];
