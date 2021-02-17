@@ -1,19 +1,16 @@
 import { InputRule, inputRules } from 'prosemirror-inputrules';
 import { schema } from '../schema';
 
-export function createList(regexp: RegExp) {
-    return new InputRule(regexp, (state, _, start, end) => {
-        const paragraph = schema.nodes.paragraph.create();
-        const listItem = schema.nodes.listItem.create(undefined, paragraph);
+const startBulletedList = (regexp: RegExp) =>
+    new InputRule(regexp, (state, match, start, end) => {
+        const listItem = schema.nodes.listItem.create();
         const bulletList = schema.nodes.bulletList.create(undefined, listItem);
-        const tr = state.tr.delete(start, end);
-        tr.insert(start, bulletList);
+        const tr = state.tr.replaceRangeWith(start, end, bulletList);
         return tr;
     });
-}
 
 const ListPlugin = inputRules({
-    rules: [createList(/- /g)]
+    rules: [startBulletedList(new RegExp('^-[^S\\n]', 'gi'))] // for some reason, simply using '^- ' does not work
 });
 
 export { ListPlugin };

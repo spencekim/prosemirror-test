@@ -1,3 +1,5 @@
+import { ListActionsPlugin } from './plugins/listActionsPlugin';
+import { insertTab } from './insertTab';
 import { wrapInList } from './commands';
 import { baseKeymap } from 'prosemirror-commands';
 import { keymap } from 'prosemirror-keymap';
@@ -24,10 +26,12 @@ export function createEditor(args: EditorArgs): Editor {
         schema,
         plugins: [
             ListPlugin,
+            ListActionsPlugin,
             history({ newGroupDelay: 300 }),
             keymap({
                 'Mod-z': undo,
                 'Mod-Shift-z': redo,
+                Tab: insertTab,
                 'Mod-o': wrapInList(schema.nodes.bulletList, {})
             }),
             keymap(baseKeymap)
