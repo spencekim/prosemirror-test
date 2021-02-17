@@ -3,7 +3,8 @@ import { schema } from '../schema';
 
 const startBulletedList = (regexp: RegExp) =>
     new InputRule(regexp, (state, match, start, end) => {
-        const listItem = schema.nodes.listItem.create();
+        const paragraph = schema.nodes.paragraph.create();
+        const listItem = schema.nodes.listItem.create(undefined, paragraph);
         const bulletList = schema.nodes.bulletList.create(undefined, listItem);
         const tr = state.tr.replaceRangeWith(start, end, bulletList);
         return tr;

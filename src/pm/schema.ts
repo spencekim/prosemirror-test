@@ -15,6 +15,9 @@ const paragraph: NodeSpec = {
 export const bulletList: NodeSpec = {
     content: 'listItem+',
     group: 'block',
+    attrs: {
+        nestingDepth: { default: 0 }
+    },
     parseDOM: [{ tag: 'ul' }],
     toDOM() {
         return ['ul', 0];
@@ -24,7 +27,7 @@ export const bulletList: NodeSpec = {
 // :: NodeSpec
 // A list item (`<li>`) spec.
 export const listItem: NodeSpec = {
-    content: 'inline*',
+    content: 'paragraph* bulletList*',
     group: 'block',
     parseDOM: [{ tag: 'li' }],
     toDOM() {
