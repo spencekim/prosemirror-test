@@ -1,7 +1,7 @@
-import { Fragment, Slice } from 'prosemirror-model';
+import { Fragment, Node, NodeRange, Slice } from 'prosemirror-model';
 import { EditorState, Plugin, PluginKey, Transaction } from 'prosemirror-state';
 import { schema } from '../schema';
-import { canSplit, ReplaceAroundStep } from 'prosemirror-transform';
+import { canSplit, ReplaceAroundStep, liftTarget } from 'prosemirror-transform';
 
 export const ListActionsPlugin = new Plugin({
     key: new PluginKey('listActionsPlugin'),
@@ -19,7 +19,6 @@ export const ListActionsPlugin = new Plugin({
 
             let shouldDispatch = false;
             const tr = view.state.tr;
-
             switch (event.code) {
                 case 'Enter':
                     shouldDispatch = splitListItem(tr, view.state);
@@ -27,22 +26,130 @@ export const ListActionsPlugin = new Plugin({
                 case 'Tab':
                     if (event.shiftKey) {
                         // lift list item
+                        shouldDispatch = liftListItem(tr, view.state);
+                        break;
                     }
                     shouldDispatch = sinkListItem(tr, view.state);
                     break;
-                // case 'Backspace':
-                //     break;
+                case 'Backspace':
+                    // delete current list item and go to end of previous list item
+                    break;
             }
 
             if (shouldDispatch) {
                 view.dispatch(tr);
                 return true;
             }
-
             return false;
         }
     }
 });
+
+const liftListItem = (tr: Transaction, state: EditorState) => {
+    const { $from, $to } = state.selection;
+    const itemType = schema.nodes.listItem;
+
+    const range = $from.blockRange(
+        $to,
+        (node) => node.childCount !== 0 && node.firstChild?.type == itemType
+    );
+    if (!range) return false;
+    if ($from.node(range.depth - 1).type == itemType) {
+        // Inside a parent list
+        return liftToOuterList(range, tr);
+    }
+    // Outer list node
+    return liftOutOfList(range, tr);
+};
+
+const liftToOuterList = (range: NodeRange, tr: Transaction) => {
+    const end = range.end;
+    const endOfList = range.$to.end(range.depth);
+    if (end < endOfList) {
+        // There are siblings after the lifted items, which must become
+        // children of the last item
+        tr.step(
+            new ReplaceAroundStep(
+                end - 1,
+                endOfList,
+                end,
+                endOfList,
+                new Slice(
+                    Fragment.from(
+                        schema.nodes.listItem.create(null, range.parent.copy())
+                    ),
+                    1,
+                    0
+                ),
+                1,
+                true
+            )
+        );
+        range = new NodeRange(
+            tr.doc.resolve(range.$from.pos),
+            tr.doc.resolve(endOfList),
+            range.depth
+        );
+    }
+    tr.lift(range, liftTarget(range) as number);
+    return true;
+};
+
+const liftOutOfList = (range: NodeRange, tr: Transaction) => {
+    const list = range.parent;
+
+    // Merge the list items into a single big item
+    for (
+        let pos = range.end, i = range.endIndex - 1, e = range.startIndex;
+        i > e;
+        i--
+    ) {
+        pos -= list.child(i).nodeSize;
+        tr.delete(pos - 1, pos + 1);
+    }
+    const $start = tr.doc.resolve(range.start);
+    const item = $start.nodeAfter as Node;
+    const atStart = range.startIndex == 0;
+    const atEnd = range.endIndex == list.childCount;
+    const parent = $start.node(-1),
+        indexBefore = $start.index(-1);
+
+    if (
+        !parent.canReplace(
+            indexBefore + (atStart ? 0 : 1),
+            indexBefore + 1,
+            item.content.append(atEnd ? Fragment.empty : Fragment.from(list))
+        )
+    )
+        return false;
+    const start = $start.pos,
+        end = start + item.nodeSize;
+    // Strip off the surrounding list. At the sides where we're not at
+    // the end of the list, the existing list is closed. At sides where
+    // this is the end, it is overwritten to its end.
+    tr.step(
+        new ReplaceAroundStep(
+            start - (atStart ? 1 : 0),
+            end + (atEnd ? 1 : 0),
+            start + 1,
+            end - 1,
+            new Slice(
+                (atStart
+                    ? Fragment.empty
+                    : Fragment.from(list.copy(Fragment.empty))
+                ).append(
+                    atEnd
+                        ? Fragment.empty
+                        : Fragment.from(list.copy(Fragment.empty))
+                ),
+                atStart ? 0 : 1,
+                atEnd ? 0 : 1
+            ),
+            atStart ? 0 : 1
+        )
+    );
+    return true;
+};
 
 // Sink the list item around the selection down into an inner list
 const sinkListItem = (tr: Transaction, state: EditorState) => {
